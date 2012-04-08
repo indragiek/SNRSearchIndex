@@ -1,0 +1,158 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <title>Snrsearchindex by indragiek</title>
+
+    <link rel="stylesheet" href="stylesheets/styles.css">
+    <link rel="stylesheet" href="stylesheets/pygment_trac.css">
+    <script src="javascripts/scale.fix.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+
+    <!--[if lt IE 9]>
+    <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+  </head>
+  <body>
+    <div class="wrapper">
+      <header>
+        <h1>Snrsearchindex</h1>
+<p>SearchKit backed search for Core Data</p>
+        <p class="view"><a href="https://github.com/indragiek/SNRSearchIndex">View the Project on GitHub <small>indragiek/SNRSearchIndex</small></a></p>
+        <ul>
+          <li><a href="https://github.com/indragiek/SNRSearchIndex/zipball/master">Download <strong>ZIP File</strong></a></li>
+          <li><a href="https://github.com/indragiek/SNRSearchIndex/tarball/master">Download <strong>TAR Ball</strong></a></li>
+          <li><a href="https://github.com/indragiek/SNRSearchIndex">View On <strong>GitHub</strong></a></li>
+        </ul>
+      </header>
+      <section>
+        <p><code>SNRSearchIndex</code> is a simple wrapper for the <a href="http://developer.apple.com/library/mac/#documentation/UserExperience/Reference/SearchKit/Reference/reference.html">SearchKit framework</a> that is specifically focused around providing lightning fast search for Core Data databases. SearchKit is the framework that Apple's Spotlight is built on, and it's primary use is full text search of documents. That said, it's so fast that it's applicable to a wide variety of cases. I tried using SearchKit with Core Data on a hunch, and the results were far better than I expected. It's really not the code itself that's the valuable part of this project, but the concept of using a FTS framework for searching a Core Data DB.</p>
+
+<p><strong>SNRSearchIndex must be compiled under ARC.</strong> If your project has not been converted to use ARC yet, you can add the <code>-f-objc-arc</code> flag to <code>SNRSearchIndex.m</code> in the Compile Sources build phase for your project. </p>
+
+<h2>Usage</h2>
+
+<h3>Creating/Opening a Search Index</h3>
+
+<p>This is fairly self explanatory. The <code>-initByOpeningSearchIndexAtURL:persistentStoreCoordinator</code> and <code>-initByCreatingSearchIndexAtURL:persistentStoreCoordinator</code> methods of <code>SNRSearchIndex</code> will open or create a search index file at the specified URL. If no URL is specified, it will automatically set the URL as <strong>[directory that the first NSPersistentStore is located in]/searchindex</strong>. </p>
+
+<pre><code>SNRSearchIndex *index = [[SNRSearchIndex alloc] initByCreatingSearchIndexAtURL:nil persistentStoreCoordinator:self.persistentStoreCoordinator];
+</code></pre>
+
+<h3>Using a Shared Search Index</h3>
+
+<p>Often times, your application will only use a single search index, and it's inconvenient having to maintain references to a search index from all of the various objects that use it. Therefore, <code>SNRSearchIndex</code> has the <code>+sharedIndex</code> and <code>+setSharedIndex:</code> class methods to get and set a shared index that will be easily accessible from anywhere in your code.</p>
+
+<pre><code>// Set the shared index when you first create it
+[SNRSearchIndex setSharedIndex:index]
+
+// From another class...
+SNRSearchIndex *theIndex = [SNRSearchIndex sharedIndex];
+</code></pre>
+
+<h3>Setting Keywords for Managed Objects</h3>
+
+<p>Setting keywords to save in the search index for your managed objects is simple. Create an <code>NSArray</code> of <code>NSString</code>s of the keywords for that object and call <code>-setKeywords:forObjectID:</code>.  The reason that <code>NSManagedObjectID</code>'s are used vs. the <code>NSManagedObject</code>s themselves is because <code>SearchKit</code>, and therefore <code>SNRSearchIndex</code>, is threadsafe and passing around the managed objects themselves is not thread safe because they are confined to a single managed object context.</p>
+
+<pre><code>Car *car = …; // NSManagedObject subclass
+NSArray *keywords = [NSArray arrayWithObjects:@"car", @"red", @"leather", @"v6", nil];
+[[SNRSearchIndex sharedIndex] setKeywords:keywords forObjectID:[car objectID]];
+</code></pre>
+
+<p>One of the main annoyances with using a separate search index is that you need to keep it in sync with the managed object context when an attribute of a model object changes that affects the keywords in the search index. Therefore, it would be convenient to use custom accessors or KVO in your <code>NSManagedObject</code> subclass to automatically update the keywords in the search index. Example:</p>
+
+<pre><code>@interface Game : NSManagedObject
+@property (nonatomic, retain) NSString *name;
+@end
+
+@interface Game (CoreDataGeneratedPrimitiveAccessors)
+- (void)setPrimitiveName:(NSString*)primitiveName;
+@end
+
+@implementation Game
+- (void)setName:(NSString*)value
+{
+    [self willChangeValueForKey:@"name"];
+    [self setPrimitiveName:value];
+    [self didChangeValueForKey:@"name"];
+    NSArray *keywords = [value componentsSeparatedByString:@" "]; // Create keywords by separating the name by its spaces
+    [[SNRSearchIndex sharedIndex] setKeywords:keywords forObjectID:[self objectID]];
+}
+@end
+</code></pre>
+
+<h3>Synchronizing Saves with NSManagedObjectContext</h3>
+
+<p>Calling <code>-flush</code> on an <code>SNRSearchIndex</code> will commit any changes to the backing store, much like calling <code>-save:</code> on an <code>NSManagedObjectContext</code>. Instead of having to call save on both every time changes are made, it is far simpler to implement a method in a category for <code>NSManagedObjectContext</code> that saves both the search index and the MOC:</p>
+
+<pre><code>@interface NSManagedObjectContext (SearchIndex)
+- (BOOL)saveContextAndSearchIndex:(NSError**)error;
+@end
+
+@implementation NSManagedObjectContext (SearchIndex)
+- (BOOL)saveContextAndSearchIndex:(NSError**)error
+{
+    BOOL success = [[SNRSearchIndex sharedIndex] flush];
+    if (![self save:error]) {
+        return NO;
+    }
+    return success;
+}
+@end
+</code></pre>
+
+<h3>Creating a Search Query</h3>
+
+<p>The <code>SNRSearchIndexSearch</code> object encapsulates a single search query. Use the <code>-searchForQuery:options:</code> method of <code>SNRSearchIndex</code> to create a search query object. The values for the <code>options</code> parameter are documented in the header. <code>SearchKit</code> supports a specific set of query operators that are described <a href="http://developer.apple.com/library/mac/documentation/UserExperience/Reference/SearchKit/Reference/reference.html#//apple_ref/c/func/SKSearchCreate">here</a>. </p>
+
+<pre><code>// Substring search for 'berry'
+SNRSearchIndexSearch *search = [[SNRSearchIndex sharedIndex] searchForQuery:@"*berry" options:0];  
+// this would return results for 'strawberry', 'blackberry', etc.
+</code></pre>
+
+<h3>Performing a Search Query</h3>
+
+<p>Search queries are performed using the <code>-findMatchesWithFetchLimit:maximumTime:handler</code> method of <code>SNRSearchIndexSearch</code>. These parameters are documented in the header. This method can be called from a background thread, and once the search results are retrieved, they are passed to the handler block as an array of <code>SNRSearchIndexResult</code> objects. Mapping these results to actual <code>NSManagedObject</code>'s is trivial:</p>
+
+<pre><code>[search findMatchesWithFetchLimit:10 maximumTime:1.0 handler:^(NSArray *results) {
+    NSMutableArray *objects = [NSMutableArray arrayWithCapacity:[results count]];
+    for (SNRSearchIndexResult *result in results) {
+        NSManagedObject *object = [self.managedObjectContext existingObjectWithID:result.objectID error:nil];
+        if (object) { [objects addObject:object]; }
+    }
+    // Do something with the objects array
+}];
+</code></pre>
+
+<p><strong>Note:</strong> If you're implementing a "type to search" feature, it would be a good idea to cancel the previous search query before executing a new one. Implement a property setter that retains a reference to the current search query and cancels the old one when a new one is set:</p>
+
+<pre><code>- (void)setCurrentSearch:(SNRSearchIndexSearch*)search 
+{
+    if (_currentSearch != search) {
+        [_currentSearch cancel];
+        _currentSearch = search;
+    }
+}
+</code></pre>
+
+<h3>Relevance Scores</h3>
+
+<p><code>SearchKit</code> has support for relevance scores, which rank search results based on some algorithms that determine their similarity to the search query. <code>SNRSearchIndex</code> exposes these relevance scores, but they probably aren't that accurate nor useful for this purpose (they're more useful for full text search).</p>
+
+<h2>About Me</h2>
+
+<p>I'm Indragie Karunaratne, a 17 year old Mac and iOS developer. Visit my <a href="http://indragie.com">website</a> to check out my portfolio and get in touch with me.</p>
+
+<h2>Licensing</h2>
+
+<p><code>SNRSearchIndex</code> is licensed under the <a href="http://www.opensource.org/licenses/bsd-license.php">BSD license</a>.</p>
+      </section>
+    </div>
+    <footer>
+      <p>Project maintained by <a href="https://github.com/indragiek">indragiek</a></p>
+      <p>Hosted on GitHub Pages &mdash; Theme by <a href="https://github.com/orderedlist">orderedlist</a></p>
+    </footer>
+    <!--[if !IE]><script>fixScale(document);</script><!--<![endif]-->
+  </body>
+</html>
