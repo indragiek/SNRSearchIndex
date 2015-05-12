@@ -82,11 +82,11 @@ The `SNRSearchIndexSearch` object encapsulates a single search query. Use the `-
     
 ### Performing a Search Query
 
-Search queries are performed using the `-findMatchesWithFetchLimit:maximumTime:handler` method of `SNRSearchIndexSearch`. These parameters are documented in the header. This method can be called from a background thread, and once the search results are retrieved, they are passed to the handler block as an array of `SNRSearchIndexResult` objects. Mapping these results to actual `NSManagedObject`'s is trivial:
+Search queries are performed using the `-findMatchesWithFetchLimit:maximumTime:handler` method of `SNRSearchIndexSearch`. These parameters are documented in the header. This method can be called from a background thread, and once the search results are retrieved, they are passed to the handler block as an array of `SNRSearchIndexSearchResult` objects. Mapping these results to actual `NSManagedObject`'s is trivial:
 
     [search findMatchesWithFetchLimit:10 maximumTime:1.0 handler:^(NSArray *results) {
     	NSMutableArray *objects = [NSMutableArray arrayWithCapacity:[results count]];
-    	for (SNRSearchIndexResult *result in results) {
+    	for (SNRSearchIndexSearchResult *result in results) {
     		NSManagedObject *object = [self.managedObjectContext existingObjectWithID:result.objectID error:nil];
     		if (object) { [objects addObject:object]; }
     	}
